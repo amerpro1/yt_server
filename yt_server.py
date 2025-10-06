@@ -1,79 +1,81 @@
-# yt_server.py
 from flask import Flask, request, jsonify, send_file
-from yt_dlp import YoutubeDL
+import yt_dlp
 import os
 import tempfile
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
-COOKIES_PATH = "youtube.com_cookies.txt"  # ملف الكوكيز من المتصفح (اختياري)
+# مسار ملف الكوكيز (اختياري)
+COOKIES_PATH = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
-@app.route('/')
+@app.route("/")
 def home():
-    return jsonify({
-        "status": "✅ Universal Video Downloader Server is Running",
-        "version": "4.0",
-        "supported_sites": [
-            "YouTube", "Facebook", "Instagram", "TikTok", "X (Twitter)", "Reels", "Pinterest"
-        ]
-    })
+    return jsonify({"status": "✅ Server is running!", "version": "3.0", "supports": "YouTube, TikTok, Instagram, Facebook, Twitter"})
 
-@app.route('/info')
-def info():
+# ✅ جلب معلومات الفيديو
+@app.route("/info", methods=["GET"])
+def get_info():
     url = request.args.get("url")
     if not url:
         return jsonify({"error": "❌ Missing URL"}), 400
 
+    ydl_opts = {
+        "quiet": True,
+        "skip_download": True,
+        "cookies": COOKIES_PATH if os.path.exists(COOKIES_PATH) else None,
+    }
+
     try:
-        ydl_opts = {
-            'quiet': True,
-            'skip_download': True,
-            'cookiefile': COOKIES_PATH if os.path.exists(COOKIES_PATH) else None,
-        }
-        with YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return jsonify({
-                "title": info.get("title"),
+                "title": info.get("title", "بدون عنوان"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
-                "extractor": info.get("extractor"),
+                "ext": info.get("ext"),
                 "webpage_url": info.get("webpage_url"),
             })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"⚠️ Error: {str(e)}"}), 500
 
-
-@app.route('/download')
-def download():
+# ✅ تحميل الفيديو أو الصوت
+@app.route("/download", methods=["GET"])
+def download_video():
     url = request.args.get("url")
-    media_type = request.args.get("type", "mp4")  # mp3 or mp4
+    media_type = request.args.get("type", "mp4")
+
     if not url:
         return jsonify({"error": "❌ Missing URL"}), 400
 
+    temp_dir = tempfile.mkdtemp()
+    filename = f"downloaded_media.{media_type}"
+    file_path = os.path.join(temp_dir, filename)
+
+    ydl_opts = {
+        "outtmpl": file_path,
+        "format": "bestaudio/best" if media_type == "mp3" else "bestvideo+bestaudio/best",
+        "merge_output_format": media_type,
+        "noplaylist": True,
+        "cookies": COOKIES_PATH if os.path.exists(COOKIES_PATH) else None,
+        "quiet": True,
+    }
+
     try:
-        tmp_dir = tempfile.mkdtemp()
-        out_path = os.path.join(tmp_dir, "%(title)s.%(ext)s")
-
-        ydl_opts = {
-            'outtmpl': out_path,
-            'cookiefile': COOKIES_PATH if os.path.exists(COOKIES_PATH) else None,
-            'format': 'bestaudio/best' if media_type == 'mp3' else 'bestvideo+bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-            }] if media_type == 'mp3' else []
-        }
-
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            if media_type == "mp3":
-                file_path = os.path.splitext(file_path)[0] + ".mp3"
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
         return send_file(file_path, as_attachment=True)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"⚠️ Download failed: {str(e)}"}), 500
+    finally:
+        try:
+            os.remove(file_path)
+        except:
+            pass
 
-
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    print(f"🚀 Server started on port {port}")
+    app.run(host="0.0.0.0", port=port)
