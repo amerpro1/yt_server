@@ -1,77 +1,76 @@
-import os
+# yt_server.py
 from flask import Flask, request, jsonify, send_file
-import yt_dlp
+from yt_dlp import YoutubeDL
+import os
 import tempfile
 
 app = Flask(__name__)
 
-# ✅ مجلد مؤقت لحفظ الملفات
-DOWNLOAD_DIR = tempfile.gettempdir()
+COOKIES_PATH = "youtube.com_cookies.txt"  # ملف الكوكيز الذي أضفته
 
-# ✅ إعدادات yt-dlp العامة
-def get_ydl_opts(audio_only=False):
-    return {
-        "quiet": True,
-        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
-        "cookiefile": "cookies.txt",  # ⚙️ ملف الكوكيز (اختياري لكن مهم لليوتيوب)
-        "format": "bestaudio/best" if audio_only else "best",
-        "noplaylist": True,
-        "ignoreerrors": True,
-        "geo_bypass": True,
-        "nocheckcertificate": True,
-        "http_headers": {"User-Agent": "Mozilla/5.0"},
-    }
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "✅ Server is running!",
+        "version": "3.0",
+        "supports": ["YouTube", "Facebook", "Instagram", "TikTok", "Twitter", "X"]
+    })
 
-# ✅ فحص حالة السيرفر
-@app.route("/")
-def index():
-    return jsonify({"status": "✅ Server is running!", "version": "2.5", "platforms": ["YouTube", "TikTok", "Instagram", "Facebook", "Twitter", "Direct links"]})
-
-
-# ✅ جلب معلومات الفيديو
-@app.route("/info")
-def get_info():
+@app.route('/info')
+def info():
     url = request.args.get("url")
     if not url:
-        return jsonify({"error": "❌ No URL provided"}), 400
+        return jsonify({"error": "Missing URL"}), 400
 
     try:
-        ydl_opts = get_ydl_opts()
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            'cookiefile': COOKIES_PATH,
+        }
+        with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return jsonify({
                 "title": info.get("title"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
-                "uploader": info.get("uploader"),
-                "ext": info.get("ext"),
-                "webpage_url": info.get("webpage_url"),
+                "extractor": info.get("extractor"),
             })
     except Exception as e:
-        return jsonify({"error": f"⚠️ Error fetching video info: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-# ✅ تحميل الفيديو أو الصوت
-@app.route("/download")
-def download_video():
+@app.route('/download')
+def download():
     url = request.args.get("url")
-    vtype = request.args.get("type", "mp4")
-
+    media_type = request.args.get("type", "mp4")  # mp3 or mp4
     if not url:
-        return jsonify({"error": "❌ No URL provided"}), 400
+        return jsonify({"error": "Missing URL"}), 400
 
-    audio_only = (vtype == "mp3")
     try:
-        ydl_opts = get_ydl_opts(audio_only)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        tmp_dir = tempfile.mkdtemp()
+        out_path = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+
+        ydl_opts = {
+            'outtmpl': out_path,
+            'cookiefile': COOKIES_PATH,
+            'format': 'bestaudio/best' if media_type == 'mp3' else 'bestvideo+bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }] if media_type == 'mp3' else []
+        }
+
+        with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             file_path = ydl.prepare_filename(info)
+            if media_type == "mp3":
+                file_path = os.path.splitext(file_path)[0] + ".mp3"
 
         return send_file(file_path, as_attachment=True)
     except Exception as e:
-        return jsonify({"error": f"⚠️ Error downloading: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=10000)
