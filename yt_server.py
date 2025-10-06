@@ -1,13 +1,13 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import yt_dlp
-import tempfile
 import os
+import tempfile
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({"status": "✅ Server is running!", "version": "3.1"})
+    return jsonify({"status": "✅ Server is running!", "version": "3.5"})
 
 @app.route('/info')
 def info():
@@ -43,7 +43,9 @@ def download():
         return jsonify({"error": "❌ URL required"}), 400
 
     try:
-        temp_dir = tempfile.gettempdir()
+        temp_dir = os.path.join(os.getcwd(), "downloads")
+        os.makedirs(temp_dir, exist_ok=True)
+
         ext = 'mp3' if dtype == 'mp3' else 'mp4'
         output_path = os.path.join(temp_dir, f"video.{ext}")
 
@@ -60,16 +62,17 @@ def download():
             }] if dtype == "mp3" else []
         }
 
+        # ✅ تأكد من وجود FFmpeg
+        os.system("apt-get update && apt-get install -y ffmpeg")
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
         if not os.path.exists(output_path):
-            return jsonify({"error": "File not found after download"}), 500
+            return jsonify({"error": "❌ File not found after download"}), 500
 
-        return jsonify({
-            "status": "✅ Done",
-            "file_url": output_path
-        })
+        # ✅ إرسال الملف مباشرة بدل إرجاع مسار
+        return send_file(output_path, as_attachment=True)
 
     except Exception as e:
         return jsonify({"error": f"Download failed: {str(e)}"}), 500
