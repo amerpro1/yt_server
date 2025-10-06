@@ -1,79 +1,77 @@
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request, jsonify, send_file
 import yt_dlp
 import tempfile
-import os
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return jsonify({"status": "✅ Server is running!", "version": "3.1"})
+# ✅ مجلد مؤقت لحفظ الملفات
+DOWNLOAD_DIR = tempfile.gettempdir()
 
-@app.route('/info')
-def info():
-    url = request.args.get('url')
+# ✅ إعدادات yt-dlp العامة
+def get_ydl_opts(audio_only=False):
+    return {
+        "quiet": True,
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s"),
+        "cookiefile": "cookies.txt",  # ⚙️ ملف الكوكيز (اختياري لكن مهم لليوتيوب)
+        "format": "bestaudio/best" if audio_only else "best",
+        "noplaylist": True,
+        "ignoreerrors": True,
+        "geo_bypass": True,
+        "nocheckcertificate": True,
+        "http_headers": {"User-Agent": "Mozilla/5.0"},
+    }
+
+# ✅ فحص حالة السيرفر
+@app.route("/")
+def index():
+    return jsonify({"status": "✅ Server is running!", "version": "2.5", "platforms": ["YouTube", "TikTok", "Instagram", "Facebook", "Twitter", "Direct links"]})
+
+
+# ✅ جلب معلومات الفيديو
+@app.route("/info")
+def get_info():
+    url = request.args.get("url")
     if not url:
-        return jsonify({"error": "❌ URL is required"}), 400
+        return jsonify({"error": "❌ No URL provided"}), 400
 
     try:
-        ydl_opts = {
-            "quiet": True,
-            "skip_download": True,
-            "nocheckcertificate": True,
-            "ignoreerrors": True
-        }
+        ydl_opts = get_ydl_opts()
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return jsonify({
-                "title": info.get("title", "No title"),
-                "thumbnail": info.get("thumbnail", ""),
-                "uploader": info.get("uploader", ""),
-                "duration": info.get("duration", 0)
+                "title": info.get("title"),
+                "thumbnail": info.get("thumbnail"),
+                "duration": info.get("duration"),
+                "uploader": info.get("uploader"),
+                "ext": info.get("ext"),
+                "webpage_url": info.get("webpage_url"),
             })
     except Exception as e:
-        return jsonify({"error": f"Server processing error: {str(e)}"}), 500
+        return jsonify({"error": f"⚠️ Error fetching video info: {str(e)}"}), 500
 
 
-@app.route('/download')
-def download():
-    url = request.args.get('url')
-    dtype = request.args.get('type', 'mp4')
+# ✅ تحميل الفيديو أو الصوت
+@app.route("/download")
+def download_video():
+    url = request.args.get("url")
+    vtype = request.args.get("type", "mp4")
 
     if not url:
-        return jsonify({"error": "❌ URL required"}), 400
+        return jsonify({"error": "❌ No URL provided"}), 400
 
+    audio_only = (vtype == "mp3")
     try:
-        temp_dir = tempfile.gettempdir()
-        ext = 'mp3' if dtype == 'mp3' else 'mp4'
-        output_path = os.path.join(temp_dir, f"video.{ext}")
-
-        ydl_opts = {
-            "quiet": True,
-            "outtmpl": output_path,
-            "format": "bestaudio/best" if dtype == "mp3" else "best",
-            "nocheckcertificate": True,
-            "ignoreerrors": True,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192"
-            }] if dtype == "mp3" else []
-        }
-
+        ydl_opts = get_ydl_opts(audio_only)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
 
-        if not os.path.exists(output_path):
-            return jsonify({"error": "File not found after download"}), 500
-
-        return jsonify({
-            "status": "✅ Done",
-            "file_url": output_path
-        })
-
+        return send_file(file_path, as_attachment=True)
     except Exception as e:
-        return jsonify({"error": f"Download failed: {str(e)}"}), 500
+        return jsonify({"error": f"⚠️ Error downloading: {str(e)}"}), 500
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
