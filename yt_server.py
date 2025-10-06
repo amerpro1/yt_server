@@ -6,27 +6,29 @@ import tempfile
 
 app = Flask(__name__)
 
-COOKIES_PATH = "youtube.com_cookies.txt"  # ملف الكوكيز الذي أضفته
+COOKIES_PATH = "youtube.com_cookies.txt"  # ملف الكوكيز من المتصفح (اختياري)
 
 @app.route('/')
 def home():
     return jsonify({
-        "status": "✅ Server is running!",
-        "version": "3.0",
-        "supports": ["YouTube", "Facebook", "Instagram", "TikTok", "Twitter", "X"]
+        "status": "✅ Universal Video Downloader Server is Running",
+        "version": "4.0",
+        "supported_sites": [
+            "YouTube", "Facebook", "Instagram", "TikTok", "X (Twitter)", "Reels", "Pinterest"
+        ]
     })
 
 @app.route('/info')
 def info():
     url = request.args.get("url")
     if not url:
-        return jsonify({"error": "Missing URL"}), 400
+        return jsonify({"error": "❌ Missing URL"}), 400
 
     try:
         ydl_opts = {
             'quiet': True,
             'skip_download': True,
-            'cookiefile': COOKIES_PATH,
+            'cookiefile': COOKIES_PATH if os.path.exists(COOKIES_PATH) else None,
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -35,6 +37,7 @@ def info():
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
                 "extractor": info.get("extractor"),
+                "webpage_url": info.get("webpage_url"),
             })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -45,7 +48,7 @@ def download():
     url = request.args.get("url")
     media_type = request.args.get("type", "mp4")  # mp3 or mp4
     if not url:
-        return jsonify({"error": "Missing URL"}), 400
+        return jsonify({"error": "❌ Missing URL"}), 400
 
     try:
         tmp_dir = tempfile.mkdtemp()
@@ -53,7 +56,7 @@ def download():
 
         ydl_opts = {
             'outtmpl': out_path,
-            'cookiefile': COOKIES_PATH,
+            'cookiefile': COOKIES_PATH if os.path.exists(COOKIES_PATH) else None,
             'format': 'bestaudio/best' if media_type == 'mp3' else 'bestvideo+bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
