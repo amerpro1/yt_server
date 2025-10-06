@@ -1,65 +1,78 @@
 from flask import Flask, request, jsonify
 import yt_dlp
-import os
 import tempfile
+import os
 
 app = Flask(__name__)
 
-@app.route("/")
+@app.route('/')
 def home():
-    return jsonify({"status": "✅ Server is running!", "version": "3.0"})
+    return jsonify({"status": "✅ Server is running!", "version": "3.1"})
 
-@app.route("/info")
+@app.route('/info')
 def info():
-    url = request.args.get("url")
+    url = request.args.get('url')
     if not url:
         return jsonify({"error": "❌ URL is required"}), 400
 
     try:
-        ydl_opts = {"quiet": True, "skip_download": True}
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "nocheckcertificate": True,
+            "ignoreerrors": True
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(url, download=False)
             return jsonify({
-                "title": info_dict.get("title"),
-                "thumbnail": info_dict.get("thumbnail"),
-                "duration": info_dict.get("duration"),
-                "extractor": info_dict.get("extractor"),
+                "title": info.get("title", "No title"),
+                "thumbnail": info.get("thumbnail", ""),
+                "uploader": info.get("uploader", ""),
+                "duration": info.get("duration", 0)
             })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Server processing error: {str(e)}"}), 500
 
-@app.route("/download")
+
+@app.route('/download')
 def download():
-    url = request.args.get("url")
-    media_type = request.args.get("type", "mp4")
+    url = request.args.get('url')
+    dtype = request.args.get('type', 'mp4')
 
     if not url:
-        return jsonify({"error": "❌ URL is required"}), 400
+        return jsonify({"error": "❌ URL required"}), 400
 
     try:
         temp_dir = tempfile.gettempdir()
-        output_path = os.path.join(temp_dir, f"download.{'mp3' if media_type == 'mp3' else 'mp4'}")
+        ext = 'mp3' if dtype == 'mp3' else 'mp4'
+        output_path = os.path.join(temp_dir, f"video.{ext}")
 
         ydl_opts = {
-            "format": "bestaudio/best" if media_type == "mp3" else "best",
-            "outtmpl": output_path,
             "quiet": True,
+            "outtmpl": output_path,
+            "format": "bestaudio/best" if dtype == "mp3" else "best",
+            "nocheckcertificate": True,
+            "ignoreerrors": True,
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }] if media_type == "mp3" else [],
+                "preferredquality": "192"
+            }] if dtype == "mp3" else []
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
+        if not os.path.exists(output_path):
+            return jsonify({"error": "File not found after download"}), 500
+
         return jsonify({
-            "status": "✅ Success",
+            "status": "✅ Done",
             "file_url": output_path
         })
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Download failed: {str(e)}"}), 500
 
 
 if __name__ == "__main__":
