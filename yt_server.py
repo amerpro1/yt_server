@@ -1,79 +1,63 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify
 import yt_dlp
 import os
 import tempfile
-from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)  # ✅ السماح للتطبيقات الخارجية (مثل Flutter) بالاتصال
-
-# مجلد مؤقت لحفظ الملفات مؤقتاً
-DOWNLOAD_DIR = tempfile.gettempdir()
-
 
 @app.route("/")
 def home():
-    return jsonify({"status": "✅ Server is running!", "version": "2.0"})
-
+    return jsonify({"status": "✅ Server is running!", "version": "3.0"})
 
 @app.route("/info")
 def info():
-    """
-    🔹 يجلب معلومات الفيديو (العنوان + الصورة المصغرة)
-    """
     url = request.args.get("url")
     if not url:
-        return jsonify({"error": "❌ Missing URL"}), 400
+        return jsonify({"error": "❌ URL is required"}), 400
 
     try:
         ydl_opts = {"quiet": True, "skip_download": True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=False)
-            title = info_dict.get("title", "No Title")
-            thumbnail = info_dict.get("thumbnail", "")
-        return jsonify({"title": title, "thumbnail": thumbnail})
+            return jsonify({
+                "title": info_dict.get("title"),
+                "thumbnail": info_dict.get("thumbnail"),
+                "duration": info_dict.get("duration"),
+                "extractor": info_dict.get("extractor"),
+            })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/download")
 def download():
-    """
-    🔹 تحميل الفيديو أو الصوت (MP4 / MP3)
-    """
     url = request.args.get("url")
-    file_type = request.args.get("type", "mp4")
+    media_type = request.args.get("type", "mp4")
 
     if not url:
-        return jsonify({"error": "❌ Missing URL"}), 400
+        return jsonify({"error": "❌ URL is required"}), 400
 
     try:
-        out_file = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+        temp_dir = tempfile.gettempdir()
+        output_path = os.path.join(temp_dir, f"download.{'mp3' if media_type == 'mp3' else 'mp4'}")
 
-        # إعدادات التحميل
-        if file_type == "mp3":
-            ydl_opts = {
-                "format": "bestaudio/best",
-                "outtmpl": out_file,
-                "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}
-                ],
-            }
-        else:
-            ydl_opts = {
-                "format": "bestvideo+bestaudio/best",
-                "outtmpl": out_file,
-                "merge_output_format": "mp4",
-            }
+        ydl_opts = {
+            "format": "bestaudio/best" if media_type == "mp3" else "best",
+            "outtmpl": output_path,
+            "quiet": True,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }] if media_type == "mp3" else [],
+        }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            if file_type == "mp3":
-                filename = filename.rsplit(".", 1)[0] + ".mp3"
+            ydl.download([url])
 
-        # ✅ إرسال الرابط أو الملف المباشر
-        return send_file(filename, as_attachment=True)
+        return jsonify({
+            "status": "✅ Success",
+            "file_url": output_path
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
