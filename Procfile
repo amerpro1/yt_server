@@ -1,1 +1,1 @@
-web: gunicorn yt_server:app
+web: python yt_server.py
