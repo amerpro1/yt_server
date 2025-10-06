@@ -1,32 +1,37 @@
-from flask import Flask, request, jsonify, send_file
-import requests
-import os
+from flask import Flask, request, jsonify
+import yt_dlp
 import tempfile
+import os
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({"status": "✅ Server is running!", "version": "4.0-lite"})
+    return jsonify({"status": "✅ Server is running!", "version": "3.1"})
 
 @app.route('/info')
 def info():
     url = request.args.get('url')
     if not url:
         return jsonify({"error": "❌ URL is required"}), 400
+
     try:
-        # نستخدم واجهة savefrom API لجلب معلومات الفيديو
-        r = requests.get(f"https://api.sssapi.app/api/v2/info?url={url}")
-        data = r.json()
-        if "meta" in data:
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "nocheckcertificate": True,
+            "ignoreerrors": True
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
             return jsonify({
-                "title": data["meta"].get("title", "No title"),
-                "thumbnail": data["meta"].get("thumbnail", ""),
-                "duration": data["meta"].get("duration", 0)
+                "title": info.get("title", "No title"),
+                "thumbnail": info.get("thumbnail", ""),
+                "uploader": info.get("uploader", ""),
+                "duration": info.get("duration", 0)
             })
-        return jsonify({"error": "فشل في جلب المعلومات"}), 500
     except Exception as e:
-        return jsonify({"error": f"Server error: {str(e)}"}), 500
+        return jsonify({"error": f"Server processing error: {str(e)}"}), 500
 
 
 @app.route('/download')
@@ -38,25 +43,33 @@ def download():
         return jsonify({"error": "❌ URL required"}), 400
 
     try:
-        # استخدام API جاهز للتحميل من YouTube بدون yt_dlp
-        api = f"https://api.sssapi.app/api/v2/convert?url={url}&format={dtype}"
-        r = requests.get(api)
-        j = r.json()
+        temp_dir = tempfile.gettempdir()
+        ext = 'mp3' if dtype == 'mp3' else 'mp4'
+        output_path = os.path.join(temp_dir, f"video.{ext}")
 
-        # نحصل على رابط مباشر للتحميل
-        if "url" in j:
-            file_link = j["url"]
+        ydl_opts = {
+            "quiet": True,
+            "outtmpl": output_path,
+            "format": "bestaudio/best" if dtype == "mp3" else "best",
+            "nocheckcertificate": True,
+            "ignoreerrors": True,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192"
+            }] if dtype == "mp3" else []
+        }
 
-            # نحمل الملف مؤقتًا في السيرفر
-            temp_dir = tempfile.gettempdir()
-            file_path = os.path.join(temp_dir, f"video.{dtype}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-            with open(file_path, "wb") as f:
-                f.write(requests.get(file_link).content)
+        if not os.path.exists(output_path):
+            return jsonify({"error": "File not found after download"}), 500
 
-            return send_file(file_path, as_attachment=True)
-
-        return jsonify({"error": "❌ Download link not found"}), 500
+        return jsonify({
+            "status": "✅ Done",
+            "file_url": output_path
+        })
 
     except Exception as e:
         return jsonify({"error": f"Download failed: {str(e)}"}), 500
